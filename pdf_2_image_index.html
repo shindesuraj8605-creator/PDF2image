@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>pdf2image — Convert PDF to Images (dark)</title>
+  <style>
+    :root{--bg:#0b0f12;--card:#0f1417;--muted:#98a0a6;--accent:#6ee7b7}
+    html,body{height:100%;margin:0;font-family:Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial}
+    body{background:linear-gradient(180deg,#050607 0%, #0b0f12 100%);color:#e6eef6;display:flex;align-items:center;justify-content:center;padding:24px}
+    .app{width:100%;max-width:980px}
+    header{display:flex;align-items:center;gap:16px;margin-bottom:18px}
+    .logo{display:flex;align-items:center;gap:12px}
+    .logo .dot{width:44px;height:44px;border-radius:8px;background:linear-gradient(135deg,var(--accent),#3dd7b0);display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#052018}
+    h1{font-size:20px;margin:0}
+    p.lead{margin:0;color:var(--muted);font-size:13px}
+
+    .card{background:var(--card);border-radius:12px;padding:18px;box-shadow:0 6px 18px rgba(2,6,8,0.6)}
+
+    .uploader{border:2px dashed rgba(255,255,255,0.04);padding:22px;border-radius:10px;display:flex;gap:18px;align-items:center}
+    .drop{flex:1;min-height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center}
+    .muted{color:var(--muted)}
+    .controls{display:flex;gap:10px;align-items:center}
+    input[type=file]{display:none}
+    .btn{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;border-radius:8px;cursor:pointer;color:inherit}
+    .btn.primary{background:linear-gradient(90deg,var(--accent),#3dd7b0);border:none;color:#06221a}
+
+    .options{display:flex;gap:10px;align-items:center;margin-top:12px}
+    select,input[type=range]{background:transparent;border:1px solid rgba(255,255,255,0.04);color:inherit;padding:8px;border-radius:8px}
+
+    .preview{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-top:14px}
+    .thumb{background:#071214;border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:8px;align-items:center}
+    .thumb img{max-width:100%;border-radius:6px}
+    .thumb small{color:var(--muted)}
+
+    .footer{display:flex;gap:10px;align-items:center;margin-top:14px}
+    progress{width:100%;height:14px;border-radius:8px}
+
+    .meta{display:flex;gap:10px;align-items:center;margin-top:10px;color:var(--muted);font-size:13px}
+
+    footer{margin-top:14px;color:var(--muted);font-size:13px}
+
+    @media(max-width:640px){.preview{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="logo">
+        <div class="dot">P2</div>
+        <div>
+          <h1>pdf2image</h1>
+          <p class="lead">Convert PDF pages into high-quality images — fully in your browser (no uploads).</p>
+        </div>
+      </div>
+    </header>
+
+    <div class="card">
+      <div class="uploader" id="uploader">
+        <div class="drop" id="dropArea">
+          <div style="font-size:20px">📄 ➜ 🖼️</div>
+          <div><strong>Drop a PDF file here</strong> or <label class="btn" for="fileInput">Choose file</label></div>
+          <div class="muted">Supports multi-page PDFs. Conversion is done locally in your browser.</div>
+          <input id="fileInput" type="file" accept="application/pdf">
+        </div>
+      </div>
+
+      <div class="options">
+        <div class="controls">
+          <label class="muted" for="format">Format</label>
+          <select id="format">
+            <option value="image/png">PNG</option>
+            <option value="image/jpeg" selected>JPG</option>
+          </select>
+        </div>
+
+        <div class="controls">
+          <label class="muted" for="quality">Quality</label>
+          <input id="quality" type="range" min="0.4" max="1" step="0.05" value="0.9" title="JPEG quality (ignored for PNG)">
+        </div>
+
+        <div class="controls">
+          <label class="muted" for="scale">Scale</label>
+          <select id="scale">
+            <option value="1">1x (fast)</option>
+            <option value="1.5">1.5x</option>
+            <option value="2" selected>2x (better)</option>
+            <option value="3">3x (high-res)</option>
+          </select>
+        </div>
+
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button id="convertBtn" class="btn primary">Convert</button>
+          <button id="downloadBtn" class="btn" disabled>Download ZIP</button>
+        </div>
+      </div>
+
+      <div class="meta" id="meta">No file selected</div>
+      <div style="margin-top:10px">
+        <progress id="progress" value="0" max="100" style="display:none"></progress>
+      </div>
+
+      <div class="preview" id="preview"></div>
+      <footer>Built with <span class="muted">pdf.js</span> + <span class="muted">JSZip</span>. All processing stays on your device.</footer>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/pdfjs-dist/build/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+  <script>
+    // Configure pdf.js worker
+    if(window.pdfjsLib){
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist/build/pdf.worker.min.js';
+    }
+
+    const fileInput = document.getElementById('fileInput');
+    const dropArea = document.getElementById('dropArea');
+    const convertBtn = document.getElementById('convertBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const preview = document.getElementById('preview');
+    const meta = document.getElementById('meta');
+    const progress = document.getElementById('progress');
+
+    let loadedPdf = null;
+    let lastFile = null;
+    let producedImages = [];
+
+    function humanSize(bytes){
+      if(bytes < 1024) return bytes + ' B';
+      if(bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+      return (bytes/(1024*1024)).toFixed(2) + ' MB';
+    }
+
+    fileInput.addEventListener('change', e => {
+      if(e.target.files && e.target.files[0]) handleFile(e.target.files[0]);
+    });
+
+    ;['dragenter','dragover','dragleave','drop'].forEach(ev => {
+      dropArea.addEventListener(ev, e => e.preventDefault());
+    });
+
+    dropArea.addEventListener('drop', e => {
+      const f = e.dataTransfer.files[0];
+      if(f) handleFile(f);
+    });
+
+    function handleFile(file){
+      if(!file.type || !file.type.includes('pdf')){
+        alert('Please select a PDF file.');
+        return;
+      }
+      lastFile = file;
+      meta.textContent = `Selected: ${file.name} — ${humanSize(file.size)}`;
+      preview.innerHTML = '';
+      producedImages = [];
+      downloadBtn.disabled = true;
+    }
+
+    async function arrayBufferFromFile(file){
+      return await file.arrayBuffer();
+    }
+
+    async function convertPDF(){
+      if(!lastFile){ alert('Please choose a PDF first.'); return; }
+      const format = document.getElementById('format').value;
+      const quality = parseFloat(document.getElementById('quality').value);
+      const scale = parseFloat(document.getElementById('scale').value);
+
+      progress.style.display = 'block';
+      progress.value = 0;
+
+      const data = await arrayBufferFromFile(lastFile);
+      const loadingTask = pdfjsLib.getDocument({data});
+      const pdf = await loadingTask.promise;
+      const total = pdf.numPages;
+      meta.textContent = `Converting ${total} page(s)...`;
+
+      const zip = new JSZip();
+
+      for(let i=1;i<=total;i++){
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({scale: 1});
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // render at chosen scale
+        canvas.width = Math.round(viewport.width * scale);
+        canvas.height = Math.round(viewport.height * scale);
+
+        const renderContext = {
+          canvasContext: ctx,
+          viewport: page.getViewport({scale})
+        };
+
+        await page.render(renderContext).promise;
+
+        // convert canvas to blob
+        const dataUrl = canvas.toDataURL(format, format === 'image/jpeg' ? quality : 1);
+        const blob = dataURLtoBlob(dataUrl);
+        const ext = format === 'image/png' ? 'png' : 'jpg';
+        const filename = `${sanitizeFilename(lastFile.name)}-page-${String(i).padStart(3,'0')}.${ext}`;
+
+        zip.file(filename, blob);
+        producedImages.push({filename, blob, url: URL.createObjectURL(blob)});
+
+        // add preview
+        const item = document.createElement('div'); item.className = 'thumb';
+        const img = document.createElement('img'); img.src = producedImages[producedImages.length-1].url;
+        const small = document.createElement('small'); small.textContent = filename;
+        item.appendChild(img); item.appendChild(small);
+        preview.appendChild(item);
+
+        progress.value = Math.round((i/total)*100);
+      }
+
+      const zipBlob = await zip.generateAsync({type:'blob'}, metadata => {
+        // optional progress callback
+      });
+
+      // attach zip to download button via blob URL
+      downloadBtn.disabled = false;
+      downloadBtn.onclick = () => saveAs(zipBlob, sanitizeFilename(lastFile.name).replace(/\.[^/.]+$/, '') + '-images.zip');
+
+      meta.textContent = `Done — ${producedImages.length} images produced.`;
+      progress.style.display = 'none';
+    }
+
+    function dataURLtoBlob(dataurl) {
+      var arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1], bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+      while(n--){ u8arr[n] = bstr.charCodeAt(n); }
+      return new Blob([u8arr], {type:mime});
+    }
+
+    function sanitizeFilename(name){
+      return name.replace(/[^a-z0-9\.\-\_]/gi,'_');
+    }
+
+    convertBtn.addEventListener('click', async () => {
+      convertBtn.disabled = true;
+      convertBtn.textContent = 'Converting...';
+      try{ await convertPDF(); }
+      catch(err){ console.error(err); alert('Conversion failed: '+err.message); }
+      convertBtn.disabled = false;
+      convertBtn.textContent = 'Convert';
+    });
+
+    // quick keyboard support
+    window.addEventListener('paste', e => {
+      const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+      for (const it of items) {
+        if(it.kind === 'file'){
+          const file = it.getAsFile(); handleFile(file);
+        }
+      }
+    });
+
+    // small UX: open file selector on drop area click
+    dropArea.addEventListener('click', () => fileInput.click());
+  </script>
+</body>
+</html>
